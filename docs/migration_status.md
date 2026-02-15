@@ -45,8 +45,8 @@
 | 模块 | Python 源文件 | Go 文件 | 状态 | 契约测试 | upstream 版本 |
 |------|-------------|---------|------|---------|--------------|
 | providers/base | `providers/base.py` | `internal/providers/base.go` | 🟢 | n/a | `v0.1.3.post7` |
-| providers/registry | `providers/registry.py` | `internal/providers/registry.go` | ⬜ | ⬜ | — |
-| providers/provider | `providers/litellm_provider.py` | `internal/providers/provider.go` | ⬜ | ⬜ | — |
+| providers/registry | `providers/registry.py` | `internal/providers/registry.go` | 🟢 | ✅ | `v0.1.3.post7` |
+| providers/provider | `providers/litellm_provider.py` | `internal/providers/provider.go` | 🟢 | ✅ | `v0.1.3.post7` |
 | providers/transcription | `providers/transcription.py` | `internal/providers/transcription.go` | ⬜ | ⬜ | — |
 
 ## Phase 4: Agent 核心
