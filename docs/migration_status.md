@@ -53,11 +53,11 @@
 
 | 模块 | Python 源文件 | Go 文件 | 状态 | 契约测试 | upstream 版本 |
 |------|-------------|---------|------|---------|--------------|
-| agent/memory | `agent/memory.py` | `internal/agent/memory.go` | ⬜ | ⬜ | — |
-| agent/skills | `agent/skills.py` | `internal/agent/skills.go` | ⬜ | ⬜ | — |
-| agent/context | `agent/context.py` | `internal/agent/context.go` | ⬜ | ⬜ | — |
-| agent/loop | `agent/loop.py` | `internal/agent/loop.go` | ⬜ | ⬜ | — |
-| agent/subagent | `agent/subagent.py` | `internal/agent/subagent.go` | ⬜ | ⬜ | — |
+| agent/memory | `agent/memory.py` | `internal/agent/memory.go` | 🟢 | ✅ | `v0.1.3.post7` |
+| agent/skills | `agent/skills.py` | `internal/agent/skills.go` | 🟢 | ✅ | `v0.1.3.post7` |
+| agent/context | `agent/context.py` | `internal/agent/context.go` | 🟢 | ✅ | `v0.1.3.post7` |
+| agent/loop | `agent/loop.py` | `internal/agent/loop.go` | 🟢 | ✅ | `v0.1.3.post7` |
+| agent/subagent | `agent/subagent.py` | `internal/agent/subagent.go` | 🟢 | ✅ | `v0.1.3.post7` |
 
 ## Phase 5: 频道集成
 
