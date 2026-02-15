@@ -1,0 +1,17 @@
+{
+    "description": "Valid nanobot configuration for testing",
+    "channel": {
+        "telegram": {
+            "token": "test-token-123",
+            "allow_from": [
+                "user1",
+                "user2"
+            ]
+        }
+    },
+    "agent": {
+        "model": "anthropic/claude-sonnet-4-5",
+        "max_tokens": 4096,
+        "temperature": 0.7
+    }
+}

@@ -1,0 +1,21 @@
+# Binaries
+bin/
+nanobot
+
+# Go
+*.exe
+*.test
+*.out
+cover.html
+cover.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
