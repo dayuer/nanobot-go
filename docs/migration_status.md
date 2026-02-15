@@ -21,10 +21,10 @@
 |------|-------------|---------|------|---------|--------------|
 | bus/events | `bus/events.py` | `internal/bus/events.go` | 🟢 | n/a | `v0.1.3.post7` |
 | bus/queue | `bus/queue.py` | `internal/bus/queue.go` | 🟢 | n/a | `v0.1.3.post7` |
-| config/schema | `config/schema.py` | `internal/config/schema.go` | ⬜ | ⬜ | — |
-| config/loader | `config/loader.py` | `internal/config/loader.go` | ⬜ | ⬜ | — |
-| session/manager | `session/manager.py` | `internal/session/manager.go` | ⬜ | ⬜ | — |
-| utils/helpers | `utils/helpers.py` | `internal/utils/helpers.go` | ⬜ | n/a | — |
+| config/schema | `config/schema.py` | `internal/config/doc.go` | 🟢 | n/a | `v0.1.3.post7` |
+| config/loader | `config/loader.py` | `internal/config/loader.go` | 🟢 | n/a | `v0.1.3.post7` |
+| session/manager | `session/manager.py` | `internal/session/doc.go` | 🟢 | n/a | `v0.1.3.post7` |
+| utils/helpers | `utils/helpers.py` | `internal/utils/doc.go` | 🟢 | n/a | `v0.1.3.post7` |
 
 ## Phase 2: 工具系统
 
