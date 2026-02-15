@@ -64,12 +64,12 @@
 | 模块 | Python 源文件 | Go 文件 | 状态 | 契约测试 | upstream 版本 |
 |------|-------------|---------|------|---------|--------------|
 | channels/base | `channels/base.py` | `internal/channels/base.go` | 🟢 | ✅ | `v0.1.3.post7` |
-| channels/manager | `channels/manager.py` | `internal/channels/manager.go` | ⬜ | ⬜ | — |
-| channels/telegram | `channels/telegram.py` | `internal/channels/telegram.go` | ⬜ | ⬜ | — |
+| channels/manager | `channels/manager.py` | `internal/channels/manager.go` | 🟢 | ✅ | `v0.1.3.post7` |
+| channels/telegram | `channels/telegram.py` | `internal/channels/telegram.go` | 🟢 | ✅ | `v0.1.3.post7` |
 | channels/discord | `channels/discord.py` | `internal/channels/discord.go` | ⬜ | ⬜ | — |
-| channels/slack | `channels/slack.py` | `internal/channels/slack.go` | ⬜ | ⬜ | — |
-| channels/whatsapp | `channels/whatsapp.py` | `internal/channels/whatsapp.go` | ⬜ | ⬜ | — |
-| channels/feishu | `channels/feishu.py` | `internal/channels/feishu.go` | ⬜ | ⬜ | — |
+| channels/slack | `channels/slack.py` | `internal/channels/slack.go` | 🟢 | ✅ | `v0.1.3.post7` |
+| channels/whatsapp | `channels/whatsapp.py` | `internal/channels/whatsapp.go` | 🟢 | ✅ | `v0.1.3.post7` |
+| channels/feishu | `channels/feishu.py` | `internal/channels/feishu.go` | 🟢 | ✅ | `v0.1.3.post7` |
 | channels/dingtalk | `channels/dingtalk.py` | `internal/channels/dingtalk.go` | ⬜ | ⬜ | — |
 | channels/email | `channels/email.py` | `internal/channels/email.go` | ⬜ | ⬜ | — |
 | channels/qq | `channels/qq.py` | `internal/channels/qq.go` | ⬜ | ⬜ | — |
