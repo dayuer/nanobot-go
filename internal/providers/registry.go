@@ -78,6 +78,7 @@ var Providers = []*ProviderSpec{
 		Name: "deepseek", Keywords: []string{"deepseek"},
 		EnvKey: "DEEPSEEK_API_KEY", DisplayName: "DeepSeek",
 		LiteLLMPrefix: "deepseek", SkipPrefixes: []string{"deepseek/"},
+		DefaultAPIBase: "https://api.deepseek.com/v1",
 	},
 	// Gemini
 	{

@@ -9,6 +9,7 @@ type Config struct {
 	Tools     ToolsConfig     `json:"tools"`
 	Gateway   GatewayConfig   `json:"gateway"`
 	WebSearch WebSearchConfig `json:"webSearch"`
+	Survival  SurvivalConfig  `json:"survival"`
 }
 
 // ChannelConfig holds per-channel settings.
@@ -130,6 +131,13 @@ type GatewayConfig struct {
 type WebSearchConfig struct {
 	Provider string `json:"provider,omitempty"`
 	APIKey   string `json:"apiKey,omitempty"`
+}
+
+// SurvivalConfig holds Survival backend connection settings.
+type SurvivalConfig struct {
+	APIURL string `json:"apiUrl,omitempty"` // Backend URL (e.g. http://host.docker.internal:3000)
+	APIKey string `json:"apiKey,omitempty"` // Backend auth key (SURVIVAL_API_KEY)
+	NanobotAPIKey string `json:"nanobotApiKey,omitempty"` // HTTP API auth key (NANOBOT_API_KEY)
 }
 
 // DefaultConfig returns a Config with sensible defaults.

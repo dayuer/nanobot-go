@@ -139,17 +139,13 @@ func (p *Provider) resolveModel(model string) string {
 		return model
 	}
 
+	// When calling a provider's own API directly (not gateway),
+	// strip the "provider/" prefix from model names like "deepseek/deepseek-chat"
 	spec := FindByModel(model)
-	if spec != nil && spec.LiteLLMPrefix != "" {
-		hasPrefix := false
-		for _, sp := range spec.SkipPrefixes {
-			if strings.HasPrefix(model, sp) {
-				hasPrefix = true
-				break
-			}
-		}
-		if !hasPrefix {
-			model = spec.LiteLLMPrefix + "/" + model
+	if spec != nil && spec.DefaultAPIBase != "" {
+		// Direct API call — strip prefix
+		if idx := strings.Index(model, "/"); idx >= 0 {
+			model = model[idx+1:]
 		}
 	}
 	return model
