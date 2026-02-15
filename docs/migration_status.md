@@ -32,12 +32,12 @@
 |------|-------------|---------|------|---------|--------------|
 | tools/base | `agent/tools/base.py` | `internal/tools/base.go` | 🟢 | ✅ | `v0.1.3.post7` |
 | tools/registry | `agent/tools/registry.py` | `internal/tools/registry.go` | 🟢 | n/a | `v0.1.3.post7` |
-| tools/shell | `agent/tools/shell.py` | `internal/tools/shell.go` | ⬜ | ⬜ | — |
-| tools/filesystem | `agent/tools/filesystem.py` | `internal/tools/filesystem.go` | ⬜ | ⬜ | — |
-| tools/web | `agent/tools/web.py` | `internal/tools/web.go` | ⬜ | ⬜ | — |
-| tools/message | `agent/tools/message.py` | `internal/tools/message.go` | ⬜ | ⬜ | — |
-| tools/spawn | `agent/tools/spawn.py` | `internal/tools/spawn.go` | ⬜ | ⬜ | — |
-| tools/cron | `agent/tools/cron.py` | `internal/tools/cron.go` | ⬜ | ⬜ | — |
+| tools/shell | `agent/tools/shell.py` | `internal/tools/shell.go` | 🟢 | ✅ | `v0.1.3.post7` |
+| tools/filesystem | `agent/tools/filesystem.py` | `internal/tools/filesystem.go` | 🟢 | ✅ | `v0.1.3.post7` |
+| tools/web | `agent/tools/web.py` | `internal/tools/web.go` | 🟢 | ✅ | `v0.1.3.post7` |
+| tools/message | `agent/tools/message.py` | `internal/tools/message.go` | 🟢 | ✅ | `v0.1.3.post7` |
+| tools/spawn | `agent/tools/spawn.py` | `internal/tools/message.go` | 🟢 | ✅ | `v0.1.3.post7` |
+| tools/cron | `agent/tools/cron.py` | `internal/tools/message.go` | 🟢 | ✅ | `v0.1.3.post7` |
 | tools/mcp | `agent/tools/mcp.py` | `internal/tools/mcp.go` | ⬜ | ⬜ | — |
 
 ## Phase 3: LLM Provider
