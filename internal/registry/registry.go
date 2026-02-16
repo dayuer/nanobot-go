@@ -171,6 +171,55 @@ func (r *Registry) Register(spec AgentSpec) error {
 	return nil
 }
 
+// RegisterOrUpdate dynamically registers a new agent or updates an existing one.
+// Used for WS-pushed agent_config messages from the Backend.
+func (r *Registry) RegisterOrUpdate(agentID string, config map[string]any) error {
+	r.mu.RLock()
+	_, exists := r.agents[agentID]
+	r.mu.RUnlock()
+
+	// Extract config fields
+	model, _ := config["model"].(string)
+	tempF, _ := config["temperature"].(float64)
+	maxTokensF, _ := config["max_tokens"].(float64)
+	maxIterF, _ := config["max_iterations"].(float64)
+
+	if exists {
+		// Update existing agent's spec (model/temp/tokens can be hot-swapped)
+		r.mu.Lock()
+		ra := r.agents[agentID]
+		if model != "" {
+			ra.spec.Model = model
+		}
+		if tempF > 0 {
+			ra.spec.Temperature = tempF
+		}
+		if maxTokensF > 0 {
+			ra.spec.MaxTokens = int(maxTokensF)
+		}
+		if maxIterF > 0 {
+			ra.spec.MaxIterations = int(maxIterF)
+		}
+		r.mu.Unlock()
+
+		log.Printf("[Registry] 🔄 Updated agent config: %s (model=%s, temp=%.1f, maxTokens=%d)",
+			agentID, ra.spec.Model, ra.spec.Temperature, ra.spec.MaxTokens)
+		return nil
+	}
+
+	// Register new agent
+	spec := AgentSpec{
+		ID:            agentID,
+		Description:   fmt.Sprintf("Dynamic agent: %s", agentID),
+		Model:         model,
+		Temperature:   tempF,
+		MaxTokens:     int(maxTokensF),
+		MaxIterations: int(maxIterF),
+	}
+
+	return r.Register(spec)
+}
+
 // resolveProvider returns per-agent or default provider.
 func (r *Registry) resolveProvider(spec AgentSpec) providers.LLMProvider {
 	if spec.ProviderConfig != nil && spec.ProviderConfig.APIKey != "" {

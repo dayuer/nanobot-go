@@ -47,6 +47,7 @@ type ChatResult struct {
 	AgentID        string
 	Error          string
 	RequestsMerged int // how many requests were merged (Collect mode)
+	RouteInfo      any // routing decision metadata (cluster.RouteInfo)
 }
 
 // ChatHandler processes a single (possibly merged) chat request.

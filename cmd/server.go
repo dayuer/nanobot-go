@@ -19,7 +19,9 @@ import (
 	"github.com/dayuer/nanobot-go/internal/config"
 	"github.com/dayuer/nanobot-go/internal/confighub"
 	"github.com/dayuer/nanobot-go/internal/providers"
+	nanoredis "github.com/dayuer/nanobot-go/internal/redis"
 	"github.com/dayuer/nanobot-go/internal/registry"
+	"github.com/dayuer/nanobot-go/internal/router"
 )
 
 var (
@@ -212,7 +214,40 @@ func runServer(cmd *cobra.Command, args []string) error {
 		fmt.Println("   📋 Single-agent mode (no agents.yaml)")
 	}
 
-	// 7. Create channel manager
+	// 7. Init Redis (optional, graceful fallback)
+	if cfg.Redis.URL != "" {
+		if nanoredis.Init(nanoredis.Config{
+			URL:      cfg.Redis.URL,
+			Password: cfg.Redis.Password,
+			DB:       cfg.Redis.DB,
+		}) {
+			fmt.Println("   ✅ Redis connected")
+		} else {
+			fmt.Println("   ⚠️ Redis unavailable (memory/cache features disabled)")
+		}
+	}
+
+	// 8. Create LLM Router (if router model configured and agents > 1)
+	var llmRouter *router.LLMRouter
+	if cfg.RouterModel.Model != "" && reg.Len() > 1 {
+		// Build role list from registered agents
+		var roles []router.Role
+		for _, id := range reg.AgentIDs() {
+			if spec := reg.GetSpec(id); spec != nil {
+				roles = append(roles, router.Role{
+					ID:          id,
+					Description: spec.Description,
+				})
+			}
+		}
+		if len(roles) > 0 {
+			routerProvider := providers.NewProvider("", "", cfg.RouterModel.Model, "")
+			llmRouter = router.NewLLMRouter(roles, cfg.RouterModel.Model, routerProvider)
+			fmt.Printf("   ✅ LLM Router enabled (model=%s, %d roles)\n", cfg.RouterModel.Model, len(roles))
+		}
+	}
+
+	// 9. Create channel manager
 	chMgr := channels.NewManager(msgBus)
 	if tg := cfg.Channel.Telegram; tg != nil && tg.Token != "" {
 		chMgr.Register(channels.NewTelegramChannel(tg.Token, tg.AllowFrom, msgBus))
@@ -222,7 +257,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 		fmt.Printf("   ✅ Channels: %v\n", enabled)
 	}
 
-	// 8. Start cluster HTTP + WS server
+	// 10. Start cluster HTTP + WS server
 	srv := cluster.NewServer(cluster.ServerConfig{
 		Port:          port,
 		APIKey:        apiKey,
@@ -230,6 +265,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 		WSFingerprint: wsFingerprint,
 		Registry:      reg,
 		ConfigHub:     hub,
+		Router:        llmRouter,
 	})
 
 	// WS disconnect → auto re-register to backend pool (with retry)
@@ -277,6 +313,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 				poolClient.Unregister()
 				srv.Stop()
 				chMgr.StopAll()
+				nanoredis.Close()
 				cancel()
 				return
 			}

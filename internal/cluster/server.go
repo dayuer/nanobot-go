@@ -17,8 +17,10 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/dayuer/nanobot-go/internal/confighub"
+	"github.com/dayuer/nanobot-go/internal/events"
 	"github.com/dayuer/nanobot-go/internal/lane"
 	"github.com/dayuer/nanobot-go/internal/registry"
+	"github.com/dayuer/nanobot-go/internal/router"
 )
 
 // Server is the Survival HTTP API server.
@@ -30,6 +32,11 @@ type Server struct {
 	configHub  *confighub.ConfigHub
 	laneManager *lane.Manager
 
+	// Routing
+	router      *router.LLMRouter
+	mentionMap  map[string]string // @name → roleID
+	eventEngine *events.Engine
+
 	// WebSocket
 	wsFingerprint string
 	wsConns       map[*wsConn]bool
@@ -39,7 +46,7 @@ type Server struct {
 	// Load stats
 	activeRequests atomic.Int64
 	totalRequests  atomic.Int64
-	totalLatencyMs atomic.Int64
+	latencyWin     *latencyWindow // 60s sliding window
 	startTime      time.Time
 
 	mux *http.ServeMux
@@ -54,6 +61,9 @@ type ServerConfig struct {
 	WSFingerprint string
 	Registry      *registry.Registry
 	ConfigHub     *confighub.ConfigHub
+	Router        *router.LLMRouter
+	MentionMap    map[string]string // @name → roleID
+	EventEngine   *events.Engine
 }
 
 // NewServer creates a new HTTP API server.
@@ -65,7 +75,11 @@ func NewServer(cfg ServerConfig) *Server {
 		wsFingerprint: cfg.WSFingerprint,
 		registry:      cfg.Registry,
 		configHub:     cfg.ConfigHub,
+		router:        cfg.Router,
+		mentionMap:    cfg.MentionMap,
+		eventEngine:   cfg.EventEngine,
 		wsConns:       make(map[*wsConn]bool),
+		latencyWin:    newLatencyWindow(60 * time.Second),
 		startTime:     time.Now(),
 		mux:           http.NewServeMux(),
 	}
@@ -86,6 +100,8 @@ func NewServer(cfg ServerConfig) *Server {
 	s.mux.HandleFunc("/api/chat/stream", s.withAuth(s.handleChatStream))
 	s.mux.HandleFunc("/api/agents", s.withAuth(s.handleAgents))
 	s.mux.HandleFunc("/api/config", s.withAuth(s.handleConfig))
+	s.mux.HandleFunc("/api/events", s.withAuth(s.handleEvents))
+	s.mux.HandleFunc("/api/roles", s.withAuth(s.handleRoles))
 
 	return s
 }
@@ -179,15 +195,13 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleLoad(w http.ResponseWriter, _ *http.Request) {
-	total := s.totalRequests.Load()
-	var avgMs int64
-	if total > 0 {
-		avgMs = s.totalLatencyMs.Load() / total
-	}
+	avgMs, recentCount := s.latencyWin.Avg()
 	writeJSON(w, map[string]any{
-		"activeRequests": s.activeRequests.Load(),
-		"totalRequests":  total,
-		"avgLatencyMs":   avgMs,
+		"activeRequests":  s.activeRequests.Load(),
+		"totalRequests":   s.totalRequests.Load(),
+		"avgLatencyMs":    avgMs,
+		"recentRequests":  recentCount,
+		"windowSeconds":   60,
 	})
 }
 
@@ -228,7 +242,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		s.activeRequests.Add(-1)
 		s.totalRequests.Add(1)
-		s.totalLatencyMs.Add(time.Since(start).Milliseconds())
+		s.latencyWin.Record(time.Since(start))
 	}()
 
 	// Submit to lane
@@ -248,12 +262,16 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, map[string]any{
+	respData := map[string]any{
 		"content":        result.Content,
 		"agentId":        result.AgentID,
 		"requestsMerged": result.RequestsMerged,
 		"latencyMs":      time.Since(start).Milliseconds(),
-	})
+	}
+	if result.RouteInfo != nil {
+		respData["routeInfo"] = result.RouteInfo
+	}
+	writeJSON(w, respData)
 }
 
 // handleChatStream is the SSE streaming chat endpoint.
@@ -304,20 +322,15 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		s.activeRequests.Add(-1)
 		s.totalRequests.Add(1)
-		s.totalLatencyMs.Add(time.Since(start).Milliseconds())
+		s.latencyWin.Record(time.Since(start))
 	}()
 
-	// Determine agent role
-	roleID := req.RoleID
-	if roleID == "" {
-		roleID = "general"
-	}
+	// Smart routing
+	roleID, routeMethod, routeResult := s.resolveRoute(r.Context(), req.Content, req.RoleID)
+	routeInfo := s.buildRouteInfo(roleID, routeMethod, routeResult)
 
 	// Send routing event
-	sendSSE("routing", map[string]any{
-		"agentId": roleID,
-		"method":  "stream",
-	})
+	sendSSE("routing", routeInfo)
 
 	// Send thinking event
 	sendSSE("thinking", map[string]any{
@@ -365,24 +378,36 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 }
 
 // laneHandler is the actual chat processing function called by the lane worker.
+// It performs routing, user memory injection, agent dispatch, and response cleanup.
 func (s *Server) laneHandler(ctx context.Context, req lane.ChatRequest) lane.ChatResult {
 	if s.registry == nil {
 		return lane.ChatResult{Error: "no agent registry configured"}
 	}
 
-	roleID := req.RoleID
-	if roleID == "" {
-		roleID = "general"
+	// 1. Smart routing: explicit → @mention → keyword → LLM → general
+	roleID, routeMethod, routeResult := s.resolveRoute(ctx, req.Content, req.RoleID)
+
+	// 2. Build route info for response
+	routeInfo := s.buildRouteInfo(roleID, routeMethod, routeResult)
+
+	log.Printf("[Chat] %s → %s (method=%s)", req.SessionKey, roleID, routeMethod)
+
+	// 3. Inject user memory
+	content := injectUserMemory(ctx, req.PersonID, req.Content)
+
+	// 4. Dispatch to agent
+	resp, err := s.registry.ProcessDirect(ctx, content, req.SessionKey, req.Channel, req.ChatID, roleID)
+	if err != nil {
+		return lane.ChatResult{Error: err.Error(), AgentID: roleID}
 	}
 
-	resp, err := s.registry.ProcessDirect(ctx, req.Content, req.SessionKey, req.Channel, req.ChatID, roleID)
-	if err != nil {
-		return lane.ChatResult{Error: err.Error()}
-	}
+	// 5. Strip leaked thinking
+	resp = stripThinking(resp)
 
 	return lane.ChatResult{
-		Content: resp,
-		AgentID: roleID,
+		Content:   resp,
+		AgentID:   roleID,
+		RouteInfo: &routeInfo,
 	}
 }
 
@@ -403,6 +428,68 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, s.configHub.Current())
+}
+
+// handleEvents ingests a business event and dispatches it via the EventEngine.
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	if s.eventEngine == nil {
+		writeJSONError(w, "event engine not configured", http.StatusNotImplemented)
+		return
+	}
+
+	var event map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
+		writeJSONError(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	results := s.eventEngine.Ingest(r.Context(), event)
+	writeJSON(w, map[string]any{
+		"dispatched": len(results),
+		"results":    results,
+	})
+}
+
+// handleRoles lists all team roles (agents) with their routing keywords.
+func (s *Server) handleRoles(w http.ResponseWriter, _ *http.Request) {
+	if s.registry == nil {
+		writeJSON(w, map[string]any{"roles": []any{}, "total": 0})
+		return
+	}
+
+	type roleInfo struct {
+		ID          string   `json:"id"`
+		Description string   `json:"description"`
+		Keywords    []string `json:"keywords,omitempty"`
+		IsDefault   bool    `json:"isDefault"`
+	}
+
+	var roles []roleInfo
+	for _, id := range s.registry.AgentIDs() {
+		spec := s.registry.GetSpec(id)
+		if spec == nil {
+			continue
+		}
+		r := roleInfo{
+			ID:          id,
+			Description: spec.Description,
+			IsDefault:   spec.IsDefault,
+		}
+		// Attach routing keywords
+		if kws, ok := keywordRoutes[id]; ok {
+			r.Keywords = kws
+		}
+		roles = append(roles, r)
+	}
+
+	writeJSON(w, map[string]any{
+		"roles": roles,
+		"total": len(roles),
+	})
 }
 
 // --- WebSocket ---
@@ -518,18 +605,14 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 		switch msgType {
 		case "ping":
-			// Backend ping → respond with pong + load stats (via mutex)
-			total := s.totalRequests.Load()
-			var avgMs int64
-			if total > 0 {
-				avgMs = s.totalLatencyMs.Load() / total
-			}
+			// Backend ping → respond with pong + load stats (60s window)
+			avgMs, _ := s.latencyWin.Avg()
 			pong := map[string]any{
 				"type":       "pong",
 				"instanceId": s.instanceID,
 				"load": map[string]any{
 					"activeRequests": s.activeRequests.Load(),
-					"totalRequests":  total,
+					"totalRequests":  s.totalRequests.Load(),
 					"avgLatencyMs":   avgMs,
 				},
 			}
@@ -538,6 +621,25 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		case "config_update":
 			data, _ := msg["data"].(map[string]any)
 			log.Printf("[WS] 📡 Config update received: %v", data)
+
+			// Check for agent_config subtype → dynamic agent registration
+			if subType, _ := data["type"].(string); subType == "agent_config" {
+				agentID, _ := data["agentId"].(string)
+				agentCfg, _ := data["config"].(map[string]any)
+				if agentID != "" && agentCfg != nil && s.registry != nil {
+					if err := s.registry.RegisterOrUpdate(agentID, agentCfg); err != nil {
+						log.Printf("[WS] ⚠️ Agent registration failed for %s: %v", agentID, err)
+					}
+				}
+			} else if subType == "agent_prompt" {
+				// Prompt hot-reload (future)
+				agentID, _ := data["agentId"].(string)
+				if agentID != "" {
+					log.Printf("[WS] 📡 Agent prompt refresh triggered: %s", agentID)
+				}
+			}
+
+			// Also apply to ConfigHub for global config merges
 			if s.configHub != nil {
 				raw, _ := json.Marshal(data)
 				if err := s.configHub.HandleConfigUpdate(raw); err != nil {
@@ -581,18 +683,14 @@ func (s *Server) broadcastHeartbeat() {
 	}
 	s.wsMu.Unlock()
 
-	total := s.totalRequests.Load()
-	var avgMs int64
-	if total > 0 {
-		avgMs = s.totalLatencyMs.Load() / total
-	}
+	avgMs, _ := s.latencyWin.Avg()
 
 	payload := map[string]any{
 		"type":       "heartbeat",
 		"instanceId": s.instanceID,
 		"load": map[string]any{
 			"activeRequests": s.activeRequests.Load(),
-			"totalRequests":  total,
+			"totalRequests":  s.totalRequests.Load(),
 			"avgLatencyMs":   avgMs,
 		},
 	}

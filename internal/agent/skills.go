@@ -129,12 +129,28 @@ func (s *SkillsLoader) GetSkillMetadata(name string) map[string]string {
 		return nil
 	}
 	meta := map[string]string{}
+	var lastKey string
 	for _, line := range strings.Split(match[1], "\n") {
-		if idx := strings.Index(line, ":"); idx > 0 {
+		if idx := strings.Index(line, ":"); idx > 0 && (len(line) == 0 || line[0] != ' ') {
 			key := strings.TrimSpace(line[:idx])
 			val := strings.TrimSpace(line[idx+1:])
 			val = strings.Trim(val, "\"'")
+			// YAML > (folded) and | (literal) markers — value continues on next lines
+			if val == ">" || val == "|" {
+				val = ""
+			}
 			meta[key] = val
+			lastKey = key
+		} else if lastKey != "" && len(line) > 0 && (line[0] == ' ' || line[0] == '\t') {
+			// Continuation line for multi-line YAML value
+			trimmed := strings.TrimSpace(line)
+			if meta[lastKey] == "" {
+				meta[lastKey] = trimmed
+			} else {
+				meta[lastKey] += " " + trimmed
+			}
+		} else {
+			lastKey = ""
 		}
 	}
 	return meta
