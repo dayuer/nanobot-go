@@ -32,7 +32,7 @@ type Server struct {
 
 	// WebSocket
 	wsFingerprint string
-	wsConns       map[*websocket.Conn]bool
+	wsConns       map[*wsConn]bool
 	wsMu          sync.Mutex
 	ReRegisterFn  func() // called when all WS connections drop
 
@@ -65,7 +65,7 @@ func NewServer(cfg ServerConfig) *Server {
 		wsFingerprint: cfg.WSFingerprint,
 		registry:      cfg.Registry,
 		configHub:     cfg.ConfigHub,
-		wsConns:       make(map[*websocket.Conn]bool),
+		wsConns:       make(map[*wsConn]bool),
 		startTime:     time.Now(),
 		mux:           http.NewServeMux(),
 	}
@@ -302,6 +302,32 @@ var wsUpgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
+// wsConn wraps a websocket.Conn with a write mutex for thread safety.
+// gorilla/websocket does NOT support concurrent writes.
+type wsConn struct {
+	*websocket.Conn
+	mu sync.Mutex
+}
+
+func (c *wsConn) WriteJSONSafe(v any) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.Conn.WriteJSON(v)
+}
+
+func (c *wsConn) WritePing() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.Conn.WriteMessage(websocket.PingMessage, nil)
+}
+
+func (c *wsConn) WriteCloseSafe(code int, text string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.Conn.WriteMessage(websocket.CloseMessage,
+		websocket.FormatCloseMessage(code, text))
+}
+
 // handleWS is the WebSocket endpoint — Backend connects here for heartbeat and config push.
 //
 // Protocol:
@@ -324,12 +350,13 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	conn, err := wsUpgrader.Upgrade(w, r, nil)
+	raw, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("[WS] ⚠️ Upgrade failed: %v", err)
 		return
 	}
 
+	conn := &wsConn{Conn: raw}
 	peer := r.RemoteAddr
 	log.Printf("[WS] 🔗 Connected: %s ✅", peer)
 
@@ -338,7 +365,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	s.wsMu.Unlock()
 
 	defer func() {
-		conn.Close()
+		raw.Close()
 		s.wsMu.Lock()
 		delete(s.wsConns, conn)
 		remaining := len(s.wsConns)
@@ -353,21 +380,25 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// Set pong handler for gorilla built-in ping/pong
-	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+	// Pong handler: Boss responds to our ping → extend read deadline
+	raw.SetReadDeadline(time.Now().Add(60 * time.Second))
+	raw.SetPongHandler(func(string) error {
+		raw.SetReadDeadline(time.Now().Add(60 * time.Second))
 		return nil
 	})
 
+	// Also handle any text message as activity → extend deadline
 	for {
-		_, message, err := conn.ReadMessage()
+		_, message, err := raw.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
 				log.Printf("[WS] ⚠️ Error: %v", err)
 			}
 			break
 		}
+
+		// Any message received → extend deadline
+		raw.SetReadDeadline(time.Now().Add(60 * time.Second))
 
 		var msg map[string]any
 		if err := json.Unmarshal(message, &msg); err != nil {
@@ -378,7 +409,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 		switch msgType {
 		case "ping":
-			// Backend ping → respond with pong + load stats
+			// Backend ping → respond with pong + load stats (via mutex)
 			total := s.totalRequests.Load()
 			var avgMs int64
 			if total > 0 {
@@ -393,7 +424,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 					"avgLatencyMs":   avgMs,
 				},
 			}
-			conn.WriteJSON(pong)
+			conn.WriteJSONSafe(pong)
 
 		case "config_update":
 			data, _ := msg["data"].(map[string]any)
@@ -408,14 +439,14 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		case "task":
 			data, _ := msg["data"].(map[string]any)
 			log.Printf("[WS] 📡 Task push received: %v", data)
-			// Future: Backend pushes tasks to nanobot
 		}
 	}
 }
 
-// heartbeatLoop sends heartbeat to all connected WS clients every 5 seconds.
+// heartbeatLoop sends WS-level pings + JSON heartbeat every 10 seconds.
+// Mirrors Python aiohttp's heartbeat=10.0 + autoping=True.
 func (s *Server) heartbeatLoop(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -428,14 +459,14 @@ func (s *Server) heartbeatLoop(ctx context.Context) {
 	}
 }
 
-// broadcastHeartbeat sends a heartbeat message to all connected WS clients.
+// broadcastHeartbeat sends WS ping frames + JSON heartbeat to all connections.
 func (s *Server) broadcastHeartbeat() {
 	s.wsMu.Lock()
 	if len(s.wsConns) == 0 {
 		s.wsMu.Unlock()
 		return
 	}
-	conns := make([]*websocket.Conn, 0, len(s.wsConns))
+	conns := make([]*wsConn, 0, len(s.wsConns))
 	for c := range s.wsConns {
 		conns = append(conns, c)
 	}
@@ -457,9 +488,15 @@ func (s *Server) broadcastHeartbeat() {
 		},
 	}
 
-	var dead []*websocket.Conn
+	var dead []*wsConn
 	for _, c := range conns {
-		if err := c.WriteJSON(payload); err != nil {
+		// Send WS-level ping to keep connection alive
+		if err := c.WritePing(); err != nil {
+			dead = append(dead, c)
+			continue
+		}
+		// Send JSON heartbeat for application-level monitoring
+		if err := c.WriteJSONSafe(payload); err != nil {
 			dead = append(dead, c)
 		}
 	}
@@ -479,8 +516,7 @@ func (s *Server) closeAllWS() {
 	s.wsMu.Lock()
 	defer s.wsMu.Unlock()
 	for c := range s.wsConns {
-		c.WriteMessage(websocket.CloseMessage,
-			websocket.FormatCloseMessage(websocket.CloseGoingAway, "server shutdown"))
+		c.WriteCloseSafe(websocket.CloseGoingAway, "server shutdown")
 		c.Close()
 		delete(s.wsConns, c)
 	}
