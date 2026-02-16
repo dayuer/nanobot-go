@@ -38,10 +38,10 @@ func init() {
 }
 
 // --- PID file helpers (multi-worker: one PID per line) ---
+// nginx-style: PID in ~/.nanobot/run/nanobot.pid
 
 func pidFilePath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".nanobot", pidFileName)
+	return filepath.Join(config.NanobotHome(), "run", pidFileName)
 }
 
 func writePIDs(pids []int) error {
@@ -133,6 +133,11 @@ func getWorkerCount() int {
 	return 1
 }
 
+// getLogDir returns the log directory (nginx-style: ~/.nanobot/logs/).
+func getLogDir() string {
+	return filepath.Join(config.NanobotHome(), "logs")
+}
+
 // --- Helper: spawn a single worker process ---
 
 func spawnWorker(exe string, port int, workerID int) (*os.Process, string, error) {
@@ -147,8 +152,7 @@ func spawnWorker(exe string, port int, workerID int) (*os.Process, string, error
 		serverArgs = append(serverArgs, "--agents", agentsFile)
 	}
 
-	home, _ := os.UserHomeDir()
-	logDir := filepath.Join(home, ".nanobot")
+	logDir := getLogDir()
 	os.MkdirAll(logDir, 0755)
 
 	var logFile string
@@ -271,10 +275,9 @@ registers independently to the backend pool, forming a service cluster.`,
 
 		writePIDs(allPIDs)
 
-		home, _ := os.UserHomeDir()
 		fmt.Printf("\n✅ Cluster started: %d workers on ports %d-%d\n", workers, basePort, basePort+workers-1)
 		fmt.Printf("   PID file: %s\n", pidFilePath())
-		fmt.Printf("   Logs: %s/nanobot*.log\n", filepath.Join(home, ".nanobot"))
+		fmt.Printf("   Logs: %s/nanobot*.log\n", getLogDir())
 		return nil
 	},
 }
@@ -346,8 +349,7 @@ var serverStatusCmd = &cobra.Command{
 		fmt.Printf("   PID file: %s\n", pidFilePath())
 
 		// Show log tail from main worker
-		home, _ := os.UserHomeDir()
-		logFile := filepath.Join(home, ".nanobot", "nanobot.log")
+		logFile := filepath.Join(getLogDir(), "nanobot.log")
 		if data, err := os.ReadFile(logFile); err == nil {
 			lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 			start := len(lines) - 5

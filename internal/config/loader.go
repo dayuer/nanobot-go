@@ -6,10 +6,36 @@ import (
 	"path/filepath"
 )
 
-// GetConfigPath returns the default config file path (~/.nanobot/config.json).
-func GetConfigPath() string {
+// NanobotHome returns the nanobot home directory (~/.nanobot).
+func NanobotHome() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".nanobot", "config.json")
+	return filepath.Join(home, ".nanobot")
+}
+
+// GetConfigPath returns the config file path.
+// Uses nginx-style layout: ~/.nanobot/conf/config.json
+// Falls back to legacy ~/.nanobot/config.json if it exists.
+func GetConfigPath() string {
+	root := NanobotHome()
+	newPath := filepath.Join(root, "conf", "config.json")
+
+	// If new path exists, use it
+	if _, err := os.Stat(newPath); err == nil {
+		return newPath
+	}
+
+	// If legacy path exists, migrate it
+	legacyPath := filepath.Join(root, "config.json")
+	if _, err := os.Stat(legacyPath); err == nil {
+		// Auto-migrate: move to conf/
+		os.MkdirAll(filepath.Join(root, "conf"), 0755)
+		if err := os.Rename(legacyPath, newPath); err == nil {
+			return newPath
+		}
+		return legacyPath // migration failed, use legacy
+	}
+
+	return newPath // default to new path
 }
 
 // Load reads configuration from a JSON file.
