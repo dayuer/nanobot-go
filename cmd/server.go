@@ -241,17 +241,45 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// 9. Register to backend pool (Boss uses wsFingerprint to connect back via WS)
 	poolClient.Register()
 
-	// 10. Graceful shutdown
+	// Write PID file only in direct foreground mode (not when spawned by daemon).
+	// The daemon manages the multi-PID file itself.
+	isForeground := false
+	if _, err := os.Stat(pidFilePath()); os.IsNotExist(err) {
+		writePID(os.Getpid())
+		isForeground = true
+	}
+	defer func() {
+		if isForeground {
+			removePID()
+		}
+	}()
+
+	// 10. Graceful shutdown + SIGHUP reload
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
 	go func() {
-		<-sigCh
-		fmt.Println("\n🛑 Shutting down...")
-		poolClient.Unregister() // ← 通知 backend 下线
-		srv.Stop()
-		chMgr.StopAll()
-		cancel()
+		for sig := range sigCh {
+			switch sig {
+			case syscall.SIGHUP:
+				// Reload: re-fetch config from registry
+				log.Println("🔄 SIGHUP received — reloading config...")
+				if regURL != "" {
+					if err := hub.Fetch(ctx); err != nil {
+						log.Printf("⚠️ Reload failed: %v", err)
+					} else {
+						log.Println("✅ Config reloaded from registry")
+					}
+				}
+			case syscall.SIGINT, syscall.SIGTERM:
+				fmt.Println("\n🛑 Shutting down...")
+				poolClient.Unregister()
+				srv.Stop()
+				chMgr.StopAll()
+				cancel()
+				return
+			}
+		}
 	}()
 
 	// 11. Start server (blocks)

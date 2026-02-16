@@ -123,8 +123,9 @@ type ExecConfig struct {
 
 // GatewayConfig holds gateway/server settings.
 type GatewayConfig struct {
-	Port int    `json:"port,omitempty"`
-	Host string `json:"host,omitempty"`
+	Port    int    `json:"port,omitempty"`
+	Host    string `json:"host,omitempty"`
+	Workers int    `json:"workers,omitempty"` // Number of worker processes (nginx-style)
 }
 
 // WebSearchConfig holds web search settings.
