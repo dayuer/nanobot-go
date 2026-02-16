@@ -83,6 +83,7 @@ func NewServer(cfg ServerConfig) *Server {
 	s.mux.HandleFunc("/api/status", s.withAuth(s.handleStatus))
 	s.mux.HandleFunc("/api/load", s.withAuth(s.handleLoad))
 	s.mux.HandleFunc("/api/chat", s.withAuth(s.handleChat))
+	s.mux.HandleFunc("/api/chat/stream", s.withAuth(s.handleChatStream))
 	s.mux.HandleFunc("/api/agents", s.withAuth(s.handleAgents))
 	s.mux.HandleFunc("/api/config", s.withAuth(s.handleConfig))
 
@@ -252,6 +253,114 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		"agentId":        result.AgentID,
 		"requestsMerged": result.RequestsMerged,
 		"latencyMs":      time.Since(start).Milliseconds(),
+	})
+}
+
+// handleChatStream is the SSE streaming chat endpoint.
+// SSE events: thinking → tool_call → tool_result → done / error
+// Mirrors Python handle_chat_stream().
+func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req chatRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if req.Content == "" {
+		writeJSONError(w, "content is required", http.StatusBadRequest)
+		return
+	}
+	if req.SessionKey == "" {
+		req.SessionKey = fmt.Sprintf("%s:%s", req.Channel, req.ChatID)
+	}
+
+	// Set SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no") // Nginx proxy: don't buffer
+	w.WriteHeader(http.StatusOK)
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		log.Println("[SSE] ⚠️ ResponseWriter does not support Flusher")
+		return
+	}
+
+	// Helper: send one SSE event
+	sendSSE := func(event string, data any) {
+		payload, _ := json.Marshal(data)
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, payload)
+		flusher.Flush()
+	}
+
+	s.activeRequests.Add(1)
+	start := time.Now()
+
+	defer func() {
+		s.activeRequests.Add(-1)
+		s.totalRequests.Add(1)
+		s.totalLatencyMs.Add(time.Since(start).Milliseconds())
+	}()
+
+	// Determine agent role
+	roleID := req.RoleID
+	if roleID == "" {
+		roleID = "general"
+	}
+
+	// Send routing event
+	sendSSE("routing", map[string]any{
+		"agentId": roleID,
+		"method":  "stream",
+	})
+
+	// Send thinking event
+	sendSSE("thinking", map[string]any{
+		"role":      roleID,
+		"iteration": 1,
+	})
+
+	// Submit to lane (blocks until completion)
+	mode := lane.Mode(req.Mode)
+	result, err := s.laneManager.Submit(r.Context(), lane.ChatRequest{
+		Content:    req.Content,
+		SessionKey: req.SessionKey,
+		Channel:    req.Channel,
+		ChatID:     req.ChatID,
+		PersonID:   req.PersonID,
+		RoleID:     req.RoleID,
+		Metadata:   req.Metadata,
+	}, mode)
+
+	if err != nil {
+		sendSSE("error", map[string]any{
+			"message":   err.Error(),
+			"latencyMs": time.Since(start).Milliseconds(),
+		})
+		return
+	}
+
+	if result.Error != "" {
+		sendSSE("error", map[string]any{
+			"message":   result.Error,
+			"latencyMs": time.Since(start).Milliseconds(),
+		})
+		return
+	}
+
+	// Send done event
+	sendSSE("done", map[string]any{
+		"content":    result.Content,
+		"role":       result.AgentID,
+		"sessionKey": req.SessionKey,
+		"iterations": 1,
+		"toolsUsed":  []string{},
+		"latencyMs":  time.Since(start).Milliseconds(),
 	})
 }
 
