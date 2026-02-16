@@ -231,15 +231,15 @@ func runServer(cmd *cobra.Command, args []string) error {
 		ConfigHub:     hub,
 	})
 
-	// WS disconnect → auto re-register to backend pool
-	srv.ReRegisterFn = func() { poolClient.Register() }
+	// WS disconnect → auto re-register to backend pool (with retry)
+	srv.ReRegisterFn = func() { poolClient.RegisterWithRetry(ctx) }
 
 	fmt.Printf("   ✅ HTTP API → http://0.0.0.0:%d\n", port)
 	fmt.Printf("   ✅ WebSocket → ws://0.0.0.0:%d/ws\n", port)
 	fmt.Println("────────────────────────────────────────")
 
-	// 9. Register to backend pool (Boss uses wsFingerprint to connect back via WS)
-	poolClient.Register()
+	// 9. Register to backend pool with retry (non-blocking)
+	go poolClient.RegisterWithRetry(ctx)
 
 	// Write PID file only in direct foreground mode (not when spawned by daemon).
 	// The daemon manages the multi-PID file itself.

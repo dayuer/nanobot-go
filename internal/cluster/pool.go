@@ -11,6 +11,7 @@ package cluster
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -100,7 +101,7 @@ func (p *PoolClient) Bootstrap(port int) (string, error) {
 	return fmt.Sprintf("nanobot-%s-%d", hostname, port), nil
 }
 
-// Register registers this instance with the backend pool.
+// Register registers this instance with the backend pool (single attempt).
 // POST /api/nanobot/pool {"action":"register","instanceId","url","model","toolCount","wsFingerprint"}
 func (p *PoolClient) Register() error {
 	if p.backendURL == "" {
@@ -120,7 +121,6 @@ func (p *PoolClient) Register() error {
 	data, err := p.postPool(payload)
 	if err != nil {
 		log.Printf("[Pool] ⚠️ Registration failed (%s): %v", p.backendURL, err)
-		log.Println("[Pool] → Running in standalone mode (backend can start later)")
 		return err
 	}
 
@@ -131,6 +131,35 @@ func (p *PoolClient) Register() error {
 	}
 
 	return nil
+}
+
+// RegisterWithRetry retries registration every 5s until success or context cancellation.
+// Use this for initial startup and WS disconnect re-registration.
+func (p *PoolClient) RegisterWithRetry(ctx context.Context) {
+	if p.backendURL == "" {
+		return
+	}
+
+	// First attempt
+	if err := p.Register(); err == nil {
+		return // success on first try
+	}
+	log.Println("[Pool] → Will retry registration every 5s...")
+
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("[Pool] ⛔ Registration retry cancelled")
+			return
+		case <-ticker.C:
+			if err := p.Register(); err == nil {
+				return // success
+			}
+		}
+	}
 }
 
 // Unregister removes this instance from the backend pool (called on shutdown).
