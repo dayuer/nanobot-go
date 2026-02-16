@@ -155,12 +155,7 @@ func spawnWorker(exe string, port int, workerID int) (*os.Process, string, error
 	logDir := getLogDir()
 	os.MkdirAll(logDir, 0755)
 
-	var logFile string
-	if workerID == 0 {
-		logFile = filepath.Join(logDir, "nanobot.log")
-	} else {
-		logFile = filepath.Join(logDir, fmt.Sprintf("nanobot-worker%d.log", workerID))
-	}
+	logFile := filepath.Join(logDir, fmt.Sprintf("nanobot-worker%d.log", workerID))
 
 	outFile, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
@@ -349,7 +344,7 @@ var serverStatusCmd = &cobra.Command{
 		fmt.Printf("   PID file: %s\n", pidFilePath())
 
 		// Show log tail from main worker
-		logFile := filepath.Join(getLogDir(), "nanobot.log")
+		logFile := filepath.Join(getLogDir(), "nanobot-worker0.log")
 		if data, err := os.ReadFile(logFile); err == nil {
 			lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 			start := len(lines) - 5
