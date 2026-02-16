@@ -93,6 +93,7 @@ var Providers = []*ProviderSpec{
 		LiteLLMPrefix: "zai",
 		SkipPrefixes: []string{"zhipu/", "zai/", "openrouter/", "hosted_vllm/"},
 		EnvExtras: [][2]string{{"ZHIPUAI_API_KEY", "{api_key}"}},
+		DefaultAPIBase: "https://open.bigmodel.cn/api/paas/v4",
 	},
 	// DashScope
 	{

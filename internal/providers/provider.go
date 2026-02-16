@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -82,6 +83,31 @@ func (p *Provider) Chat(ctx context.Context, req ChatRequest) (*LLMResponse, err
 	}
 
 	apiBase := p.APIBase
+	apiKey := p.APIKey
+
+	// Auto-resolve: if no explicit API base, look up the provider spec by model name
+	// and use its DefaultAPIBase + EnvKey. This enables config-driven multi-provider.
+	if apiBase == "" {
+		spec := FindByModel(model)
+		if spec != nil {
+			if spec.DefaultAPIBase != "" {
+				apiBase = spec.DefaultAPIBase
+			}
+			// Also resolve API key from env if not already set
+			if apiKey == "" && spec.EnvKey != "" {
+				apiKey = os.Getenv(spec.EnvKey)
+			}
+			// Handle extra env vars (e.g. zhipu sets ZHIPUAI_API_KEY from ZAI_API_KEY)
+			for _, extra := range spec.EnvExtras {
+				envName := extra[0]
+				envVal := extra[1]
+				if envVal == "{api_key}" && apiKey != "" {
+					os.Setenv(envName, apiKey)
+				}
+			}
+		}
+	}
+
 	if apiBase == "" {
 		apiBase = "https://api.openai.com/v1"
 	}
@@ -92,8 +118,8 @@ func (p *Provider) Chat(ctx context.Context, req ChatRequest) (*LLMResponse, err
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	if p.APIKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+p.APIKey)
+	if apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 	for k, v := range p.ExtraHeaders {
 		httpReq.Header.Set(k, v)

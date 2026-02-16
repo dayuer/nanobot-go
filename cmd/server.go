@@ -54,6 +54,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
+	cfg.ExportEnv() // Export config values as environment variables
 
 	// --- Resolve settings: CLI flag → config.json → env var ---
 

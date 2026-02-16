@@ -1,15 +1,22 @@
 // Package config handles configuration loading, saving, and schema definition.
 package config
 
+import "os"
+
 // Config is the top-level nanobot configuration.
 // Uses json tags in camelCase to match the JSON config file format.
 type Config struct {
-	Channel   ChannelConfig   `json:"channel"`
-	Agent     AgentConfig     `json:"agent"`
-	Tools     ToolsConfig     `json:"tools"`
-	Gateway   GatewayConfig   `json:"gateway"`
-	WebSearch WebSearchConfig `json:"webSearch"`
-	Survival  SurvivalConfig  `json:"survival"`
+	Channel      ChannelConfig      `json:"channel"`
+	Agent        AgentConfig        `json:"agent"`
+	Tools        ToolsConfig        `json:"tools"`
+	Gateway      GatewayConfig      `json:"gateway"`
+	WebSearch    WebSearchConfig    `json:"webSearch"`
+	Survival     SurvivalConfig     `json:"survival"`
+	APIKeys      APIKeysConfig      `json:"apiKeys"`
+	Redis        RedisConfig        `json:"redis"`
+	RouterModel  RouterModelConfig  `json:"routerModel"`
+	ContentModel ContentModelConfig `json:"contentModel"`
+	Embedding    EmbeddingConfig    `json:"embedding"`
 }
 
 // ChannelConfig holds per-channel settings.
@@ -141,6 +148,45 @@ type SurvivalConfig struct {
 	NanobotAPIKey string `json:"nanobotApiKey,omitempty"` // HTTP API auth key (NANOBOT_API_KEY)
 }
 
+// APIKeysConfig holds API keys for LLM providers.
+// Config values override environment variables.
+type APIKeysConfig struct {
+	ZhipuAI   string `json:"zhipuai,omitempty"`   // ZHIPUAI_API_KEY
+	DeepSeek  string `json:"deepseek,omitempty"`  // DEEPSEEK_API_KEY
+	OpenAI    string `json:"openai,omitempty"`    // OPENAI_API_KEY
+	Anthropic string `json:"anthropic,omitempty"` // ANTHROPIC_API_KEY
+	Gemini    string `json:"gemini,omitempty"`    // GEMINI_API_KEY
+	DashScope string `json:"dashscope,omitempty"` // DASHSCOPE_API_KEY
+	Moonshot  string `json:"moonshot,omitempty"`  // MOONSHOT_API_KEY
+}
+
+// RedisConfig holds Redis connection settings.
+type RedisConfig struct {
+	URL      string `json:"url,omitempty"`      // redis://host:port
+	Password string `json:"password,omitempty"`
+	DB       int    `json:"db,omitempty"`
+}
+
+// RouterModelConfig holds the router model settings.
+// Router model handles intent classification / semantic routing.
+type RouterModelConfig struct {
+	Model string `json:"model,omitempty"` // e.g. "zhipuai/glm-5"
+}
+
+// ContentModelConfig holds the content model settings.
+// Content model handles long-form generation (translation, summarization, writing).
+type ContentModelConfig struct {
+	APIBase string `json:"apiBase,omitempty"` // e.g. "http://115.190.110.32:5000/v1"
+	APIKey  string `json:"apiKey,omitempty"`
+	Model   string `json:"model,omitempty"`   // e.g. "DeepSeek-R1"
+}
+
+// EmbeddingConfig holds embedding model settings (for RAG).
+type EmbeddingConfig struct {
+	APIKey  string `json:"apiKey,omitempty"`
+	BaseURL string `json:"baseUrl,omitempty"` // e.g. "https://dashscope.aliyuncs.com/compatible-mode/v1"
+}
+
 // DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig() Config {
 	return Config{
@@ -162,3 +208,45 @@ func DefaultConfig() Config {
 		},
 	}
 }
+
+// ExportEnv sets environment variables from config values.
+// Config values take precedence over existing env vars.
+func (c *Config) ExportEnv() {
+	setIfNotEmpty := func(key, val string) {
+		if val != "" {
+			os.Setenv(key, val)
+		}
+	}
+
+	// API keys
+	setIfNotEmpty("ZHIPUAI_API_KEY", c.APIKeys.ZhipuAI)
+	setIfNotEmpty("ZAI_API_KEY", c.APIKeys.ZhipuAI) // provider registry uses ZAI_API_KEY
+	setIfNotEmpty("DEEPSEEK_API_KEY", c.APIKeys.DeepSeek)
+	setIfNotEmpty("OPENAI_API_KEY", c.APIKeys.OpenAI)
+	setIfNotEmpty("ANTHROPIC_API_KEY", c.APIKeys.Anthropic)
+	setIfNotEmpty("GEMINI_API_KEY", c.APIKeys.Gemini)
+	setIfNotEmpty("DASHSCOPE_API_KEY", c.APIKeys.DashScope)
+	setIfNotEmpty("MOONSHOT_API_KEY", c.APIKeys.Moonshot)
+
+	// Survival
+	setIfNotEmpty("SURVIVAL_API_URL", c.Survival.APIURL)
+	setIfNotEmpty("SURVIVAL_API_KEY", c.Survival.APIKey)
+	setIfNotEmpty("NANOBOT_API_KEY", c.Survival.NanobotAPIKey)
+
+	// Redis
+	setIfNotEmpty("REDIS_URL", c.Redis.URL)
+	setIfNotEmpty("REDIS_PASSWORD", c.Redis.Password)
+
+	// Content model
+	setIfNotEmpty("LLM_API_BASE", c.ContentModel.APIBase)
+	setIfNotEmpty("LLM_API_KEY", c.ContentModel.APIKey)
+	setIfNotEmpty("LLM_MODEL", c.ContentModel.Model)
+
+	// Embedding
+	setIfNotEmpty("BAILIAN_API_KEY", c.Embedding.APIKey)
+	setIfNotEmpty("BAILIAN_BASE_URL", c.Embedding.BaseURL)
+
+	// Router model
+	setIfNotEmpty("ROUTER_MODEL", c.RouterModel.Model)
+}
+
